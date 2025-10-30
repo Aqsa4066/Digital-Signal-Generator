@@ -1,4 +1,7 @@
 # ITT - Programming Assignment 01
+
+# Name- Aqsa Choudhary (2023BITE025)
+
 # Digital-Signal-Generator
 
 ## Problem Statement:
