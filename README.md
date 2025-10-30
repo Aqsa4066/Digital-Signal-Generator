@@ -30,19 +30,8 @@ digital signal produced and in case of scrambling, scrambled signal produced.
 
   ## Compilation
   1. Run ./digital_signal_generator
-  2. Generates CSV files like:
-     -nrzl.csv
-     -nrzi.csv
-     -manchester.csv
-     -diff_manchester.csv
-     -ami.csv
-     -ami_b8zs.csv
-     -ami_hdb3.csv
-  3. To visualize waveforms, you can use Python with Matplotlib:
-       -import pandas as pd
-       -import matplotlib.pyplot as plt
-       -df = pd.read_csv("nrzl.csv")
-       -plt.step(df['sample'], df['amplitude'], where='post')
+  2. Generates CSV files like: nrzl.csv, nrzi.csv, manchester.csv, diff_manchester.csv, ami.csv, ami_b8zs.csv, ami_hdb3.csv
+  3. To visualize waveforms, you can use Python with Matplotlib: import pandas as pd -> import matplotlib.pyplot as plt -> df = pd.read_csv("nrzl.csv") -> plt.step(df['sample'], df['amplitude'], where='post')
        -plt.title("NRZ-L Waveform")
        -plt.xlabel("Samples")
        -plt.ylabel("Amplitude")
