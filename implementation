@@ -1,167 +1,102 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-static void write_csv(const string &filename, const vector<int> &amps, int samples_per_bit=50) {
-    // Write time-indexed amplitude samples to CSV: index, amplitude
-    ofstream ofs(filename);
-    if (!ofs.is_open()) {
-        cerr << "Failed to open " << filename << " for writing.\n";
-        return;
-    }
-    ofs << "sample,amplitude\n";
-    for (size_t i = 0; i < amps.size(); ++i) {
-        for (int k = 0; k < samples_per_bit; ++k) {
-            ofs << (i * samples_per_bit + k) << "," << amps[i] << "\n";
-        }
-    }
-    ofs.close();
-    cout << "Wrote CSV: " << filename << " (" << amps.size()*samples_per_bit << " samples)\n";
+// NRZ-L
+vector<int> nrzl(const string &bits) {
+    vector<int> levels;
+    for (char b : bits) levels.push_back(b == '1' ? 1 : -1);
+    return levels;
 }
 
-static bool is_valid_bitstring(const string &s) {
-    for (char c : s) if (c != '0' && c != '1') return false;
-    return true;
-}
-
-vector<int> nrz_l(const string &bits) {
-    vector<int> out;
-    out.reserve(bits.size());
-    for (char b : bits) out.push_back(b == '1' ? 1 : -1);
-    return out;
-}
-
-vector<int> nrz_i(const string &bits) {
-    vector<int> out;
-    out.reserve(bits.size());
-    int level = -1;
+// NRZ-I
+vector<int> nrzi(const string &bits) {
+    vector<int> levels;
+    int last = -1;
     for (char b : bits) {
-        if (b == '1') level = -level;
-        out.push_back(level);
+        if (b == '1') last = -last; // toggle
+        levels.push_back(last);
     }
-    return out;
+    return levels;
 }
 
+// Manchester:
 vector<int> manchester(const string &bits) {
-    vector<int> out;
-    out.reserve(bits.size() * 2);
+    vector<int> levels;
     for (char b : bits) {
-        if (b == '1') { out.push_back(1); out.push_back(-1); }
-        else { out.push_back(-1); out.push_back(1); }
+        if (b == '1') { levels.push_back(1); levels.push_back(-1); }
+        else          { levels.push_back(-1); levels.push_back(1); }
     }
-    return out;
+    return levels;
 }
 
-vector<int> differential_manchester(const string &bits) {
-    vector<int> out;
-    out.reserve(bits.size() * 2);
+// Differential Manchester
+vector<int> diffManchester(const string &bits) {
+    vector<int> levels;
     int start = 1;
     for (char b : bits) {
-        if (b == '0') start = -start;
-        out.push_back(start);
-        out.push_back(-start); // always transition in middle
-        start = -start; // next bit's start
+        if (b == '0') start = -start;  // transition at start for 0
+        levels.push_back(start);
+        levels.push_back(-start);       // always mid-bit transition
+        start = -start;
     }
-    return out;
+    return levels;
 }
 
+// AMI
 vector<int> ami(const string &bits) {
-    vector<int> out;
-    out.reserve(bits.size());
-    int last = -1; // so first '1' becomes +1
+    vector<int> levels;
+    int last = -1;
     for (char b : bits) {
-        if (b == '1') { last = -last; out.push_back(last); }
-        else out.push_back(0);
-    }
-    return out;
-}
-
-string apply_b8zs(const string &bits) {
-    string s = bits;
-    string pattern = "00000000";
-    string repl = "000VB0VB"; // positions: 0..7 -> '0','0','0','V','B','0','V','B'
-    for (size_t pos = 0; pos + 8 <= s.size(); ++pos) {
-        if (s.substr(pos,8) == pattern) {
-            s.replace(pos,8,repl);
-            pos += 7; // jump ahead to continue after replaced block
-        }
-    }
-    return s;
-}
-
-string apply_hdb3(const string &bits) {
-    // Standard HDB3: replace 0000 with either 000V or B00V depending on parity (# of non-zero pulses since last substitution)
-    string s = bits;
-    size_t i = 0;
-    int ones_since_last = 0; // count of '1' pulses since last substitution
-    while (i + 4 <= s.size()) {
-        if (s.substr(i,4) == "0000") {
-            if ((ones_since_last % 2) == 0) {
-                s.replace(i,4,"000V");
-            } else {
-                s.replace(i,4,"B00V");
-            }
-            ones_since_last = 0;
-            i += 4;
-        } else {
-            if (s[i] == '1') ++ones_since_last;
-            ++i;
-        }
-    }
-    return s;
-}
-
-vector<int> amplitude_from_decorated(const string &decorated) {
-    // Convert decorated string to amplitudes:
-    // '1' -> alternate polarity (+1 / -1)
-    // '0' -> 0
-    // 'B' -> bipolar substitution acts like a normal '1' (toggle polarity)
-    // 'V' -> violation: repeat last amplitude (no toggle)
-    vector<int> amps;
-    amps.reserve(decorated.size());
-    int last = -1; // so first toggle becomes +1
-    for (char c : decorated) {
-        if (c == '1' || c == 'B') {
+        if (b == '1') {
             last = -last;
-            amps.push_back(last);
-        } else if (c == 'V') {
-            amps.push_back(last); // violation repeats previous polarity
-        } else { // '0' or other
-            amps.push_back(0);
-        }
+            levels.push_back(last);
+        } else levels.push_back(0);
     }
-    return amps;
+    return levels;
 }
 
-pair<string, vector<int>> pcm_encode(const vector<double> &samples, int num_bits=8, double vmin=-1.0, double vmax=1.0) {
-    // Clip samples to [vmin, vmax], uniform quantization to 2^num_bits levels
-    int L = 1 << num_bits;
-    vector<int> indices;
-    indices.reserve(samples.size());
+// Scrambling B8ZS
+string b8zs(const string &bits) {
+    string s = bits;
+    for (size_t i = 0; i + 8 <= s.size(); ++i) {
+        if (s.substr(i, 8) == "00000000") s.replace(i, 8, "000VB0VB");
+    }
+    return s;
+}
+
+// Scrambling HDB3
+string hdb3(const string &bits) {
+    string s = bits;
+    int count = 0;
+    for (size_t i = 0; i + 4 <= s.size(); ++i) {
+        if (s.substr(i, 4) == "0000") {
+            if (count % 2 == 0) s.replace(i, 4, "000V");
+            else s.replace(i, 4, "B00V");
+            count = 0;
+            i += 3;
+        } else if (s[i] == '1') count++;
+    }
+    return s;
+}
+
+// PCM 
+string pcmEncode(const vector<double> &samples, int bits=4) {
+    int L = 1 << bits;
     string bitstream;
-    bitstream.reserve(samples.size()*num_bits);
-    for (double x : samples) {
-        double xc = x;
-        if (xc < vmin) xc = vmin;
-        if (xc > vmax) xc = vmax;
-        double norm = (xc - vmin) / (vmax - vmin); // in [0,1]
-        int idx = (int)round(norm * (L - 1));
-        if (idx < 0) idx = 0;
-        if (idx >= L) idx = L-1;
-        indices.push_back(idx);
-        // append binary
-        for (int b = num_bits-1; b >= 0; --b) {
-            bitstream.push_back( ((idx>>b)&1) ? '1' : '0' );
-        }
+    for (double s : samples) {
+        int level = (int)round((s + 1) / 2 * (L - 1)); // normalize [-1,1]
+        for (int b = bits-1; b >= 0; --b)
+            bitstream.push_back(((level >> b) & 1) ? '1' : '0');
     }
-    return {bitstream, indices};
+    return bitstream;
 }
 
-string delta_modulation_encode(const vector<double> &samples, double step=0.1) {
+// Delta Modulation
+string deltaModulation(const vector<double> &samples, double step=0.2) {
     string bits;
-    bits.reserve(samples.size());
-    double approx = 0.0;
-    for (double x : samples) {
-        if (x >= approx) {
+    double approx = 0;
+    for (double s : samples) {
+        if (s >= approx) {
             bits.push_back('1');
             approx += step;
         } else {
@@ -172,179 +107,81 @@ string delta_modulation_encode(const vector<double> &samples, double step=0.1) {
     return bits;
 }
 
-pair<int,int> manacher_longest_palindrome(const string &s) {
-    // Returns start index and length of longest palindromic substring in s
-    // Transform to T with separators
-    if (s.empty()) return {0,0};
-    string T;
-    T.reserve(s.size()*2 + 3);
-    T.push_back('^');
-    for (char ch : s) { T.push_back('#'); T.push_back(ch); }
-    T.push_back('#');
-    T.push_back('$');
-    int n = (int)T.size();
-    vector<int> P(n,0);
-    int C = 0, R = 0;
-    for (int i = 1; i < n-1; ++i) {
-        int mir = 2*C - i;
-        if (i < R) P[i] = min(R - i, P[mir]);
-        while (T[i + 1 + P[i]] == T[i - 1 - P[i]]) ++P[i];
-        if (i + P[i] > R) { C = i; R = i + P[i]; }
-    }
-    int maxLen = 0, centerIndex = 0;
-    for (int i = 1; i < n-1; ++i) {
-        if (P[i] > maxLen) { maxLen = P[i]; centerIndex = i; }
-    }
-    int start = (centerIndex - maxLen) / 2;
-    return {start, maxLen};
-}
+int main() {
+    cout << "Digital Signal Generator\n";
+    cout << "1. Digital Input\n2. Analog Input\n";
+    int choice;
+    cout << "Enter your choice: ";
+    cin >> choice;
+    \\ for digital input
+    if (choice == 1) {
+        string bits;
+        cout << "Enter digital bitstream (0s and 1s): ";
+        cin >> bits;
 
-void example_workflow() {
-    cout << "===== Digital Signal Generator - Demo =====\n";
+        cout << "\nSelect Line Encoding:\n";
+        cout << "1. NRZ-L\n2. NRZ-I\n3. Manchester\n4. Differential Manchester\n5. AMI\n";
+        int enc; cin >> enc;
 
-    // Example bitstream (contains long zero runs for scrambling demo)
-    string bits = "11000000110000001111100000000";
-    cout << "Input bitstream: " << bits << "\n";
-
-    // Validate
-    if (!is_valid_bitstring(bits)) {
-        cerr << "Invalid bitstring\n";
-        return;
-    }
-
-    // Longest palindromic substring
-    auto pr = manacher_longest_palindrome(bits);
-    string longest = bits.substr(pr.first, pr.second);
-    cout << "Longest palindrome: \"" << longest << "\" at index " << pr.first << " length " << pr.second << "\n";
-
-    // NRZ-L
-    auto nrzl_amp = nrz_l(bits);
-    cout << "NRZ-L amplitudes (per bit): ";
-    for (int v : nrzl_amp) cout << v << ' ';
-    cout << "\n";
-    write_csv("nrzl.csv", nrzl_amp);
-
-    // NRZ-I
-    auto nrzi_amp = nrz_i(bits);
-    cout << "NRZ-I amplitudes (per bit): ";
-    for (int v : nrzi_amp) cout << v << ' ';
-    cout << "\n";
-    write_csv("nrzi.csv", nrzi_amp);
-
-    // Manchester
-    auto man_amp = manchester(bits);
-    cout << "Manchester amplitudes (half-bit units): ";
-    for (int v : man_amp) cout << v << ' ';
-    cout << "\n";
-    write_csv("manchester.csv", man_amp);
-
-    // Differential Manchester
-    auto dman_amp = differential_manchester(bits);
-    cout << "Differential Manchester amplitudes (half-bit units): ";
-    for (int v : dman_amp) cout << v << ' ';
-    cout << "\n";
-    write_csv("diff_manchester.csv", dman_amp);
-
-    // AMI
-    auto ami_amp = ami(bits);
-    cout << "AMI amplitudes (per bit): ";
-    for (int v : ami_amp) cout << v << ' ';
-    cout << "\n";
-    write_csv("ami.csv", ami_amp);
-
-    // AMI with B8ZS
-    string decorated_b8zs = apply_b8zs(bits);
-    cout << "Decorated (B8ZS) string: " << decorated_b8zs << "\n";
-    auto amps_b8zs = amplitude_from_decorated(decorated_b8zs);
-    cout << "AMI+B8ZS amplitudes: ";
-    for (int v : amps_b8zs) cout << v << ' ';
-    cout << "\n";
-    write_csv("ami_b8zs.csv", amps_b8zs);
-
-    // AMI with HDB3
-    string decorated_hdb3 = apply_hdb3(bits);
-    cout << "Decorated (HDB3) string: " << decorated_hdb3 << "\n";
-    auto amps_hdb3 = amplitude_from_decorated(decorated_hdb3);
-    cout << "AMI+HDB3 amplitudes: ";
-    for (int v : amps_hdb3) cout << v << ' ';
-    cout << "\n";
-    write_csv("ami_hdb3.csv", amps_hdb3);
-
-    // PCM demo (analog -> bitstream)
-    // Create sample analog signal (sine) for demonstration
-    int samples = 32;
-    vector<double> analog;
-    analog.reserve(samples);
-    for (int i = 0; i < samples; ++i) {
-        double t = double(i) / samples;
-        analog.push_back(0.8 * sin(2 * M_PI * 5 * t)); // 5 cycles over duration scaled
-    }
-    auto pcm_res = pcm_encode(analog, 4, -1.0, 1.0); // 4-bit PCM
-    cout << "PCM produced bitstream length: " << pcm_res.first.size() << " (4 bits per sample * " << samples << " samples)\n";
-
-    // Delta modulation demo
-    string dm_bits = delta_modulation_encode(analog, 0.1);
-    cout << "Delta Modulation bitstream length: " << dm_bits.size() << "\n";
-
-    cout << "Demo complete. CSV waveform files produced for plotting.\n";
-}
-
-void interactive_prompt() {
-    cout << "Interactive mode: you can choose actions.\n";
-    cout << "This simple interactive prompt supports a few operations for testing.\n";
-    cout << "Enter a bitstream (0/1) and follow prompts.\n";
-
-    string bits;
-    cout << "Enter bitstream (only 0 and 1): ";
-    if (! (cin >> bits) ) return;
-    if (!is_valid_bitstring(bits)) {
-        cout << "Invalid input\n";
-        return;
-    }
-
-    cout << "Select line encoding: 1=NRZ-L 2=NRZ-I 3=Manchester 4=Diff-Manchester 5=AMI\nChoice: ";
-    int ch; cin >> ch;
-    vector<int> amps;
-    switch (ch) {
-        case 1: amps = nrz_l(bits); write_csv("nrzl_user.csv", amps); break;
-        case 2: amps = nrz_i(bits); write_csv("nrzi_user.csv", amps); break;
-        case 3: amps = manchester(bits); write_csv("manchester_user.csv", amps); break;
-        case 4: amps = differential_manchester(bits); write_csv("diffman_user.csv", amps); break;
-        case 5: {
-            cout << "Do you want scrambling? 1=B8ZS 2=HDB3 0=None: ";
-            int s; cin >> s;
-            if (s == 1) {
-                string decorated = apply_b8zs(bits);
-                amps = amplitude_from_decorated(decorated);
-                write_csv("ami_b8zs_user.csv", amps);
-            } else if (s == 2) {
-                string decorated = apply_hdb3(bits);
-                amps = amplitude_from_decorated(decorated);
-                write_csv("ami_hdb3_user.csv", amps);
-            } else {
-                amps = ami(bits);
-                write_csv("ami_user.csv", amps);
+        vector<int> levels;
+        if (enc == 1) levels = nrzl(bits);
+        else if (enc == 2) levels = nrzi(bits);
+        else if (enc == 3) levels = manchester(bits);
+        else if (enc == 4) levels = diffManchester(bits);
+        else if (enc == 5) {
+            cout << "Scrambling needed? (y/n): ";
+            char ans; cin >> ans;
+            if (ans == 'y' || ans == 'Y') {
+                cout << "Select scrambling: 1. B8ZS  2. HDB3: ";
+                int s; cin >> s;
+                if (s == 1) bits = b8zs(bits);
+                else if (s == 2) bits = hdb3(bits);
             }
-            break;
+            levels = ami(bits);
         }
-        default:
-            cout << "Unknown choice\n";
-            return;
+
+        cout << "\nEncoded Levels:\n";
+        for (int v : levels) cout << v << " ";
+        cout << "\n";
+    } 
+
+    \\for analog input
+    else if (choice == 2) {
+        int n;
+        cout << "Enter number of samples: ";
+        cin >> n;
+
+        vector<double> samples(n);
+        cout << "Enter analog samples (between -1 and +1):\n";
+        for (int i = 0; i < n; ++i) cin >> samples[i];
+
+        cout << "Select Modulation:\n1. PCM\n2. Delta Modulation\n";
+        int mod; cin >> mod;
+        string bitstream;
+
+        if (mod == 1) bitstream = pcmEncode(samples);
+        else bitstream = deltaModulation(samples);
+
+        cout << "Generated Digital Bitstream:\n" << bitstream << "\n";
+
+        cout << "\nNow choose line encoding for generated bitstream:\n";
+        cout << "1. NRZ-L\n2. NRZ-I\n3. Manchester\n4. Differential Manchester\n5. AMI\n";
+        int enc; cin >> enc;
+
+        vector<int> levels;
+        if (enc == 1) levels = nrzl(bitstream);
+        else if (enc == 2) levels = nrzi(bitstream);
+        else if (enc == 3) levels = manchester(bitstream);
+        else if (enc == 4) levels = diffManchester(bitstream);
+        else if (enc == 5) levels = ami(bitstream);
+
+        cout << "\nEncoded Levels:\n";
+        for (int v : levels) cout << v << " ";
+        cout << "\n";
+
+    } else {
+        cout << "Invalid choice.\n";
     }
-    cout << "Amplitude sequence exported to CSV. (Open in Excel/Matplotlib to plot)\n";
-}
-
-int main(int argc, char** argv) {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
-
-    // By default run the example workflow
-    example_workflow();
-
-    // Optionally let the user run interactive mode:
-    cout << "\nDo you want interactive mode? (y/n): ";
-    char c; cin >> c;
-    if (c == 'y' || c == 'Y') interactive_prompt();
 
     return 0;
 }
