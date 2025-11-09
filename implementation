@@ -113,7 +113,7 @@ int main() {
     int choice;
     cout << "Enter your choice: ";
     cin >> choice;
-    \\ for digital input
+    // for digital input
     if (choice == 1) {
         string bits;
         cout << "Enter digital bitstream (0s and 1s): ";
@@ -145,7 +145,7 @@ int main() {
         cout << "\n";
     } 
 
-    \\for analog input
+    //for analog input
     else if (choice == 2) {
         int n;
         cout << "Enter number of samples: ";
